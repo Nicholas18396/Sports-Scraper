@@ -1,0 +1,608 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Matchday — Top League Fixtures</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+
+  :root{
+    --pitch-dark:   #0b1f16;
+    --pitch:        #12301f;
+    --pitch-line:   #274a35;
+    --chalk:        #f2efe1;
+    --chalk-dim:    #a9bdae;
+    --floodlight:   #ffcc4d;
+    --card-red:     #e2492c;
+    --card-yellow:  #f2b705;
+    --shadow:       rgba(0,0,0,0.35);
+  }
+
+  *{ box-sizing:border-box; }
+
+  html{ scroll-behavior:smooth; }
+
+  body{
+    margin:0;
+    min-height:100vh;
+    background:
+      radial-gradient(ellipse 900px 500px at 50% -10%, rgba(255,204,77,0.08), transparent 60%),
+      var(--pitch-dark);
+    color:var(--chalk);
+    font-family:'Space Grotesk', sans-serif;
+    font-feature-settings:"tnum" 1;
+    font-variant-numeric: tabular-nums;
+    line-height:1.5;
+  }
+
+  @media (prefers-reduced-motion: reduce){
+    *{ animation-duration:0.001ms !important; animation-iteration-count:1 !important; transition-duration:0.001ms !important; }
+  }
+
+  /* ---------- Pitch line texture (fixed backdrop) ---------- */
+  .pitch-lines{
+    position:fixed; inset:0; z-index:0; pointer-events:none; overflow:hidden; opacity:0.55;
+  }
+  .pitch-lines::before{
+    content:"";
+    position:absolute; inset:0;
+    background-image: repeating-linear-gradient(
+        90deg, rgba(255,255,255,0.025) 0 1px, transparent 1px 160px
+      );
+  }
+  .pitch-lines .halfway{
+    position:absolute; top:0; bottom:0; left:50%; width:1px;
+    background:rgba(255,255,255,0.05);
+  }
+  .pitch-lines .circle{
+    position:absolute; top:50%; left:50%; width:520px; height:520px;
+    transform:translate(-50%,-50%);
+    border:1px solid rgba(255,255,255,0.05); border-radius:50%;
+  }
+
+  .wrap{ position:relative; z-index:1; max-width:920px; margin:0 auto; padding:0 20px 80px; }
+
+  /* ---------- Top bar ---------- */
+  .topbar{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:22px 0 10px; max-width:920px; margin:0 auto; position:relative; z-index:2;
+  }
+  .wordmark{ display:flex; align-items:center; gap:10px; }
+  .wordmark .ball{
+    width:14px; height:14px; border-radius:50%;
+    background:var(--chalk);
+    box-shadow: inset -2px -2px 0 rgba(0,0,0,0.25);
+    position:relative;
+  }
+  .wordmark span{
+    font-family:'Anton', sans-serif; letter-spacing:0.06em; font-size:1.15rem;
+  }
+  .clock{ font-size:0.85rem; color:var(--chalk-dim); text-align:right; }
+  .clock b{ color:var(--chalk); font-weight:600; }
+
+  /* ---------- Hero ---------- */
+  .hero{ padding:34px 0 26px; text-align:left; }
+  .hero h1{
+    font-family:'Anton', sans-serif;
+    font-weight:400;
+    font-size:clamp(2.6rem, 8vw, 4.4rem);
+    line-height:0.95;
+    margin:0 0 10px;
+    letter-spacing:0.01em;
+  }
+  .hero h1 .line2{ color:var(--floodlight); }
+  .hero p{ margin:0; max-width:46ch; color:var(--chalk-dim); font-size:1rem; }
+
+  /* ---------- Day tabs (substitution-board style) ---------- */
+  .tabs{
+    display:flex; gap:8px; margin:28px 0 18px; flex-wrap:wrap;
+  }
+  .tab{
+    appearance:none; border:1px solid var(--pitch-line); background:var(--pitch);
+    color:var(--chalk-dim); font-family:'Space Grotesk', sans-serif; font-weight:600;
+    font-size:0.85rem; padding:10px 16px; cursor:pointer; border-radius:3px;
+    transition:background 0.15s, color 0.15s, border-color 0.15s;
+  }
+  .tab:hover{ border-color:var(--floodlight); color:var(--chalk); }
+  .tab[aria-selected="true"]{
+    background:var(--floodlight); border-color:var(--floodlight); color:#221a05;
+  }
+  .tab:focus-visible{ outline:2px solid var(--floodlight); outline-offset:2px; }
+
+  /* ---------- League filter chips ---------- */
+  .leagues{
+    display:flex; gap:8px; flex-wrap:wrap; margin-bottom:30px;
+  }
+  .chip{
+    appearance:none; display:flex; align-items:center; gap:7px;
+    border:1px solid var(--pitch-line); background:transparent; color:var(--chalk-dim);
+    font-family:'Space Grotesk', sans-serif; font-size:0.78rem; font-weight:500;
+    padding:7px 12px 7px 9px; border-radius:20px; cursor:pointer;
+    transition:opacity 0.15s, border-color 0.15s;
+  }
+  .chip .dot{ width:8px; height:8px; border-radius:50%; flex:none; }
+  .chip[aria-pressed="false"]{ opacity:0.35; }
+  .chip:hover{ border-color:var(--chalk-dim); }
+  .chip:focus-visible{ outline:2px solid var(--floodlight); outline-offset:2px; }
+
+  /* ---------- Status / meta line ---------- */
+  .meta-row{
+    display:flex; align-items:center; justify-content:space-between;
+    color:var(--chalk-dim); font-size:0.78rem; margin-bottom:14px; gap:12px;
+  }
+  .refresh-btn{
+    appearance:none; background:none; border:1px solid var(--pitch-line); color:var(--chalk-dim);
+    border-radius:3px; padding:6px 10px; font-size:0.75rem; cursor:pointer; font-family:inherit;
+    display:flex; align-items:center; gap:6px;
+  }
+  .refresh-btn:hover{ color:var(--chalk); border-color:var(--floodlight); }
+  .refresh-btn svg{ width:12px; height:12px; }
+  .refresh-btn.spinning svg{ animation:spin 0.8s linear infinite; }
+  @keyframes spin{ to{ transform:rotate(360deg); } }
+
+  /* ---------- Fixture list ---------- */
+  #fixtures{ min-height:200px; }
+
+  .date-heading{
+    font-family:'Anton', sans-serif; letter-spacing:0.02em;
+    font-size:1.05rem; color:var(--chalk); margin:34px 0 10px;
+    padding-bottom:8px; border-bottom:1px solid var(--pitch-line);
+  }
+  .date-heading:first-child{ margin-top:0; }
+
+  .league-group{ margin-bottom:6px; }
+  .league-header{
+    display:flex; align-items:center; gap:9px;
+    padding:16px 0 8px; color:var(--chalk-dim); font-size:0.78rem;
+    font-weight:600; letter-spacing:0.03em;
+  }
+  .league-header .bar{ width:4px; height:14px; border-radius:2px; flex:none; }
+
+  .match-row{
+    display:grid;
+    grid-template-columns: 52px 1fr 30px 1fr 52px;
+    align-items:center; gap:10px;
+    padding:13px 4px;
+    border-top:1px solid var(--pitch-line);
+    font-size:0.92rem;
+  }
+  .league-group .match-row:last-child{ border-bottom:1px solid var(--pitch-line); }
+
+  .match-time{
+    font-weight:600; color:var(--floodlight); font-size:0.82rem; text-align:left;
+  }
+  .match-time.live{ color:var(--card-red); display:flex; align-items:center; gap:5px; }
+  .live-dot{
+    width:7px; height:7px; border-radius:50%; background:var(--card-red);
+    animation:pulse 1.4s ease-in-out infinite;
+  }
+  @keyframes pulse{ 0%,100%{ opacity:1; } 50%{ opacity:0.25; } }
+
+  .team{ display:flex; align-items:center; gap:9px; min-width:0; }
+  .team.away{ flex-direction:row-reverse; text-align:right; }
+  .team img{ width:22px; height:22px; object-fit:contain; flex:none; }
+  .team .placeholder-badge{
+    width:22px; height:22px; border-radius:50%; border:1.5px solid var(--pitch-line); flex:none;
+  }
+  .team-name{
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:500;
+  }
+
+  .score{
+    text-align:center; font-family:'Anton', sans-serif; font-size:1.05rem; color:var(--chalk);
+  }
+  .score .sep{ color:var(--chalk-dim); font-family:'Space Grotesk',sans-serif; font-weight:400; font-size:0.75rem; }
+
+  .venue{
+    grid-column:1 / -1; color:var(--chalk-dim); font-size:0.72rem; padding:0 4px 4px 62px; margin-top:-6px;
+  }
+
+  @media (max-width:560px){
+    .match-row{ grid-template-columns: 44px 1fr 24px 1fr 44px; font-size:0.84rem; }
+    .team img, .team .placeholder-badge{ width:18px; height:18px; }
+    .venue{ padding-left:52px; }
+  }
+
+  /* ---------- Empty / loading / error states ---------- */
+  .state-panel{
+    text-align:center; padding:60px 20px; color:var(--chalk-dim);
+    border:1px dashed var(--pitch-line); border-radius:4px; margin-top:10px;
+  }
+  .state-panel .big{ font-family:'Anton', sans-serif; font-size:1.3rem; color:var(--chalk); display:block; margin-bottom:8px; }
+  .skeleton-row{
+    height:48px; border-radius:3px; margin-bottom:8px;
+    background:linear-gradient(90deg, var(--pitch) 25%, var(--pitch-line) 37%, var(--pitch) 63%);
+    background-size:400% 100%; animation:shimmer 1.4s ease infinite;
+  }
+  @keyframes shimmer{ 0%{ background-position:100% 0; } 100%{ background-position:0 0; } }
+
+  /* ---------- Footer ---------- */
+  footer{
+    margin-top:50px; padding-top:20px; border-top:1px solid var(--pitch-line);
+    color:var(--chalk-dim); font-size:0.75rem; display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px;
+  }
+  footer a{ color:var(--chalk-dim); }
+
+</style>
+</head>
+<body>
+
+<div class="pitch-lines" aria-hidden="true">
+  <div class="halfway"></div>
+  <div class="circle"></div>
+</div>
+
+<div class="topbar">
+  <div class="wordmark"><span class="ball"></span><span>MATCHDAY</span></div>
+  <div class="clock" id="clock">—</div>
+</div>
+
+<div class="wrap">
+
+  <section class="hero">
+    <h1>WHAT'S ON<br><span class="line2">THE PITCH</span></h1>
+    <p>Fixtures from the Premier League, La Liga, Serie A, Bundesliga, Ligue 1, the Champions League and MLS — pulled fresh, kickoff times in your local time.</p>
+  </section>
+
+  <div class="tabs" role="tablist" aria-label="Select fixture range">
+    <button class="tab" role="tab" data-tab="today" aria-selected="true">Today</button>
+    <button class="tab" role="tab" data-tab="tomorrow" aria-selected="false">Tomorrow</button>
+    <button class="tab" role="tab" data-tab="week" aria-selected="false">This Week</button>
+  </div>
+
+  <div class="leagues" id="leagueFilters"></div>
+
+  <div class="meta-row">
+    <span id="metaText">Loading fixtures…</span>
+    <button class="refresh-btn" id="refreshBtn" type="button">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></svg>
+      Refresh
+    </button>
+  </div>
+
+  <div id="fixtures">
+    <div class="skeleton-row"></div>
+    <div class="skeleton-row"></div>
+    <div class="skeleton-row"></div>
+  </div>
+
+  <footer>
+    <span>Data via <a href="https://www.thesportsdb.com" target="_blank" rel="noopener">TheSportsDB</a> — free tier, may lag behind official sources.</span>
+    <span id="lastUpdated"></span>
+  </footer>
+
+</div>
+
+<script>
+(function(){
+
+  // ---------------------------------------------------------------
+  // League config: matcher = (lowercased strLeague) -> boolean
+  // ---------------------------------------------------------------
+  const LEAGUES = [
+    { key:'epl',    short:'Premier League',    color:'#3D195B',
+      match:s => s.includes('premier league') && s.includes('english') },
+    { key:'laliga', short:'La Liga',            color:'#FF4B44',
+      match:s => s.includes('la liga') },
+    { key:'bund',   short:'Bundesliga',         color:'#D3010C',
+      match:s => s.includes('bundesliga') && !s.includes('austrian') && !s.includes('2. bundesliga') },
+    { key:'seriea', short:'Serie A',            color:'#008FD7',
+      match:s => s.includes('serie a') && !s.includes('brazil') },
+    { key:'ligue1', short:'Ligue 1',            color:'#0A56A3',
+      match:s => s.includes('ligue 1') },
+    { key:'ucl',    short:'Champions League',   color:'#0E1E5B',
+      match:s => s.includes('champions league') && !s.includes('concacaf') && !s.includes('afc') && !s.includes('caf') },
+    { key:'mls',    short:'MLS',                color:'#B81137',
+      match:s => s.includes('major league soccer') },
+  ];
+
+  const activeLeagues = new Set(LEAGUES.map(l => l.key));
+
+  // ---------------------------------------------------------------
+  // State
+  // ---------------------------------------------------------------
+  let allEvents = [];     // deduped, enriched events
+  let currentTab = 'today';
+  let loading = false;
+
+  const fixturesEl   = document.getElementById('fixtures');
+  const metaEl       = document.getElementById('metaText');
+  const lastUpdatedEl= document.getElementById('lastUpdated');
+  const refreshBtn   = document.getElementById('refreshBtn');
+  const leagueFiltersEl = document.getElementById('leagueFilters');
+
+  // ---------------------------------------------------------------
+  // Clock
+  // ---------------------------------------------------------------
+  function tickClock(){
+    const el = document.getElementById('clock');
+    const now = new Date();
+    const dateStr = now.toLocaleDateString(undefined, { weekday:'short', month:'short', day:'numeric' });
+    const timeStr = now.toLocaleTimeString(undefined, { hour:'2-digit', minute:'2-digit' });
+    el.innerHTML = dateStr + ' &nbsp;·&nbsp; <b>' + timeStr + '</b>';
+  }
+  tickClock();
+  setInterval(tickClock, 30000);
+
+  // ---------------------------------------------------------------
+  // League filter chips
+  // ---------------------------------------------------------------
+  function renderLeagueFilters(){
+    leagueFiltersEl.innerHTML = LEAGUES.map(l => `
+      <button class="chip" type="button" data-league="${l.key}" aria-pressed="true">
+        <span class="dot" style="background:${l.color}"></span>${l.short}
+      </button>
+    `).join('');
+
+    leagueFiltersEl.querySelectorAll('.chip').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const key = btn.dataset.league;
+        const pressed = btn.getAttribute('aria-pressed') === 'true';
+        if (pressed){ activeLeagues.delete(key); btn.setAttribute('aria-pressed','false'); }
+        else { activeLeagues.add(key); btn.setAttribute('aria-pressed','true'); }
+        renderFixtures();
+      });
+    });
+  }
+
+  // ---------------------------------------------------------------
+  // Tabs
+  // ---------------------------------------------------------------
+  document.querySelectorAll('.tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.tab').forEach(b => b.setAttribute('aria-selected','false'));
+      btn.setAttribute('aria-selected','true');
+      currentTab = btn.dataset.tab;
+      renderFixtures();
+    });
+  });
+
+  refreshBtn.addEventListener('click', () => fetchAllData(true));
+
+  // ---------------------------------------------------------------
+  // Helpers
+  // ---------------------------------------------------------------
+  function ymd(d){
+    return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+  }
+  function stripTime(d){
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  }
+  function matchLeagueKey(strLeague){
+    const s = (strLeague || '').toLowerCase();
+    const found = LEAGUES.find(l => l.match(s));
+    return found ? found.key : null;
+  }
+
+  // ---------------------------------------------------------------
+  // Fetch a single day's worldwide soccer events from TheSportsDB
+  // ---------------------------------------------------------------
+  async function fetchDay(dateStr){
+    const url = `https://www.thesportsdb.com/api/v1/json/3/eventsday.php?d=${dateStr}&s=Soccer`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('Request failed: ' + res.status);
+    const data = await res.json();
+    return data.events || [];
+  }
+
+  // ---------------------------------------------------------------
+  // Pull today-1 .. today+8 (buffer for timezone edge cases), filter
+  // to our target leagues, dedupe, enrich with a real local Date.
+  // ---------------------------------------------------------------
+  async function fetchAllData(isManualRefresh){
+    if (loading) return;
+    loading = true;
+    if (isManualRefresh) refreshBtn.classList.add('spinning');
+    metaEl.textContent = 'Loading fixtures…';
+    if (allEvents.length === 0){
+      fixturesEl.innerHTML = '<div class="skeleton-row"></div><div class="skeleton-row"></div><div class="skeleton-row"></div>';
+    }
+
+    const today = stripTime(new Date());
+    const dateStrings = [];
+    for (let i = -1; i <= 8; i++){
+      const d = new Date(today);
+      d.setDate(d.getDate() + i);
+      dateStrings.push(ymd(d));
+    }
+
+    const results = await Promise.allSettled(dateStrings.map(fetchDay));
+
+    const byId = new Map();
+    let anyFailed = false;
+    results.forEach(r => {
+      if (r.status === 'fulfilled'){
+        r.value.forEach(ev => {
+          const key = matchLeagueKey(ev.strLeague);
+          if (!key) return;
+          const localDate = ev.strTimestamp ? new Date(ev.strTimestamp) : new Date(ev.dateEvent + 'T' + (ev.strTime || '00:00:00') + 'Z');
+          if (isNaN(localDate.getTime())) return;
+          byId.set(ev.idEvent, {
+            id: ev.idEvent,
+            leagueKey: key,
+            leagueName: ev.strLeague,
+            home: ev.strHomeTeam,
+            away: ev.strAwayTeam,
+            homeBadge: ev.strHomeTeamBadge,
+            awayBadge: ev.strAwayTeamBadge,
+            venue: ev.strVenue,
+            status: ev.strStatus,
+            homeScore: ev.intHomeScore,
+            awayScore: ev.intAwayScore,
+            date: localDate,
+          });
+        });
+      } else {
+        anyFailed = true;
+      }
+    });
+
+    allEvents = Array.from(byId.values()).sort((a,b) => a.date - b.date);
+    loading = false;
+    if (isManualRefresh) refreshBtn.classList.remove('spinning');
+    lastUpdatedEl.textContent = 'Updated ' + new Date().toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'});
+    if (anyFailed && allEvents.length === 0){
+      metaEl.textContent = 'Could not reach the fixture feed.';
+      renderError();
+      return;
+    }
+    renderFixtures();
+  }
+
+  // ---------------------------------------------------------------
+  // Status formatting
+  // ---------------------------------------------------------------
+  function isLive(status){
+    return ['1H','2H','HT','ET','P','LIVE','IN PLAY'].includes((status||'').toUpperCase());
+  }
+  function isFinished(status){
+    const s = (status||'').toUpperCase();
+    return s === 'FT' || s === 'MATCH FINISHED' || s === 'AET' || s === 'FT_PEN';
+  }
+
+  function timeCell(ev){
+    if (isLive(ev.status)){
+      return `<span class="match-time live"><span class="live-dot"></span>${ev.status}</span>`;
+    }
+    if (isFinished(ev.status)){
+      return `<span class="match-time">FT</span>`;
+    }
+    return `<span class="match-time">${ev.date.toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'})}</span>`;
+  }
+
+  function scoreCell(ev){
+    if (ev.homeScore === null || ev.homeScore === undefined || ev.homeScore === ''){
+      return `<span class="score sep">vs</span>`;
+    }
+    return `<span class="score">${ev.homeScore}<span class="sep">–</span>${ev.awayScore}</span>`;
+  }
+
+  function badgeImg(url, alt){
+    if (!url) return `<span class="placeholder-badge" aria-hidden="true"></span>`;
+    return `<img src="${url}/preview" alt="" loading="lazy" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'placeholder-badge'}))">`;
+  }
+
+  function matchRow(ev){
+    return `
+      <div class="match-row">
+        ${timeCell(ev)}
+        <div class="team home">
+          ${badgeImg(ev.homeBadge)}
+          <span class="team-name">${ev.home}</span>
+        </div>
+        ${scoreCell(ev)}
+        <div class="team away">
+          ${badgeImg(ev.awayBadge)}
+          <span class="team-name">${ev.away}</span>
+        </div>
+        <span></span>
+        ${ev.venue ? `<div class="venue">${ev.venue}</div>` : ''}
+      </div>
+    `;
+  }
+
+  function leagueGroup(leagueKey, events){
+    const league = LEAGUES.find(l => l.key === leagueKey);
+    return `
+      <div class="league-group">
+        <div class="league-header">
+          <span class="bar" style="background:${league.color}"></span>${league.short}
+        </div>
+        ${events.map(matchRow).join('')}
+      </div>
+    `;
+  }
+
+  function groupByLeague(events){
+    const map = new Map();
+    events.forEach(ev => {
+      if (!map.has(ev.leagueKey)) map.set(ev.leagueKey, []);
+      map.get(ev.leagueKey).push(ev);
+    });
+    return map;
+  }
+
+  function renderError(){
+    fixturesEl.innerHTML = `
+      <div class="state-panel">
+        <span class="big">Offside — feed unreachable</span>
+        Check your connection and try refreshing.
+      </div>
+    `;
+  }
+
+  function renderEmpty(label){
+    fixturesEl.innerHTML = `
+      <div class="state-panel">
+        <span class="big">No fixtures ${label}</span>
+        Nothing from the selected leagues — try flipping on a few more chips above.
+      </div>
+    `;
+  }
+
+  // ---------------------------------------------------------------
+  // Main render: filters allEvents by tab + active leagues
+  // ---------------------------------------------------------------
+  function renderFixtures(){
+    const today = stripTime(new Date());
+    const filtered = allEvents.filter(ev => activeLeagues.has(ev.leagueKey));
+
+    if (currentTab === 'today' || currentTab === 'tomorrow'){
+      const target = new Date(today);
+      if (currentTab === 'tomorrow') target.setDate(target.getDate() + 1);
+      const dayEvents = filtered.filter(ev => stripTime(ev.date).getTime() === target.getTime());
+
+      metaEl.textContent = dayEvents.length + (dayEvents.length === 1 ? ' fixture' : ' fixtures');
+
+      if (dayEvents.length === 0){ renderEmpty(currentTab === 'today' ? 'today' : 'tomorrow'); return; }
+
+      const grouped = groupByLeague(dayEvents);
+      fixturesEl.innerHTML = Array.from(grouped.entries()).map(([key, evs]) => leagueGroup(key, evs)).join('');
+      return;
+    }
+
+    // "week" tab — 7 days from today, grouped by date then league
+    const weekEnd = new Date(today); weekEnd.setDate(weekEnd.getDate() + 7);
+    const weekEvents = filtered.filter(ev => {
+      const d = stripTime(ev.date);
+      return d >= today && d < weekEnd;
+    });
+
+    metaEl.textContent = weekEvents.length + (weekEvents.length === 1 ? ' fixture' : ' fixtures') + ' over the next 7 days';
+
+    if (weekEvents.length === 0){ renderEmpty('this week'); return; }
+
+    const byDate = new Map();
+    weekEvents.forEach(ev => {
+      const dKey = ymd(stripTime(ev.date));
+      if (!byDate.has(dKey)) byDate.set(dKey, []);
+      byDate.get(dKey).push(ev);
+    });
+
+    fixturesEl.innerHTML = Array.from(byDate.entries()).map(([dKey, evs]) => {
+      const d = new Date(dKey + 'T00:00:00');
+      const label = d.getTime() === today.getTime()
+        ? 'Today · ' + d.toLocaleDateString(undefined,{month:'short', day:'numeric'})
+        : d.toLocaleDateString(undefined,{weekday:'long', month:'short', day:'numeric'});
+      const grouped = groupByLeague(evs);
+      return `
+        <div class="date-heading">${label}</div>
+        ${Array.from(grouped.entries()).map(([key, es]) => leagueGroup(key, es)).join('')}
+      `;
+    }).join('');
+  }
+
+  // ---------------------------------------------------------------
+  // Boot
+  // ---------------------------------------------------------------
+  renderLeagueFilters();
+  fetchAllData(false);
+
+})();
+</script>
+
+</body>
+</html>
