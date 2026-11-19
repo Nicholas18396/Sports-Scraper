@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NCAA Hoops Tracker</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--text:#14181f;--mute:#667085;--line:#e3e6eb;--accent:#e8590c;--live:#d92d20;color-scheme:light dark}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1318;--card:#181e26;--text:#eef1f5;--mute:#8d98a8;--line:#2a323d;--accent:#ff8a3d;--live:#ff5b4d}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.4 system-ui,-apple-system,Segoe UI,sans-serif}
+.wrap{max-width:760px;margin:0 auto;padding:16px}
+h1{font-size:22px;margin:0 0 2px}
+.sub{color:var(--mute);font-size:13px;margin-bottom:12px}
+.bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:10px 0}
+.tabs{display:flex;gap:6px;flex-wrap:wrap}
+button{font:inherit;border:1px solid var(--line);background:var(--card);color:var(--text);padding:6px 12px;border-radius:999px;cursor:pointer}
+button.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.date{display:flex;gap:6px;align-items:center;margin-left:auto}
+.date span{min-width:110px;text-align:center;font-weight:600}
+.game{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin:8px 0}
+.row{display:flex;align-items:center;gap:10px;padding:3px 0}
+.row img{width:26px;height:26px;object-fit:contain}
+.rk{color:var(--mute);font-size:12px;min-width:20px;text-align:right}
+.nm{flex:1;font-weight:500}
+.nm.win{font-weight:700}
+.sc{font-weight:700;font-size:18px;font-variant-numeric:tabular-nums}
+.star{border:0;background:none;font-size:18px;padding:0 4px;color:var(--mute)}
+.star.f{color:#f5b301}
+.meta{display:flex;justify-content:space-between;color:var(--mute);font-size:12.5px;margin-top:6px;padding-top:6px;border-top:1px solid var(--line)}
+.live{color:var(--live);font-weight:700}
+.empty,.err{text-align:center;color:var(--mute);padding:28px 8px}
+.err{color:var(--live)}
+details{margin-top:14px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 14px}
+summary{cursor:pointer;font-weight:600}
+input{font:inherit;width:100%;padding:8px 10px;margin:10px 0 6px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--text)}
+.pick{display:flex;align-items:center;gap:8px;padding:4px 0}
+.pick img{width:22px;height:22px;object-fit:contain}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+.foot{color:var(--mute);font-size:12px;text-align:center;margin:16px 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🏀 NCAA Hoops Tracker</h1>
+  <div class="sub" id="status">Loading…</div>
+  <div class="bar">
+    <div class="tabs" id="tabs"></div>
+    <div class="date">
+      <button id="prev" aria-label="Previous day">‹</button>
+      <span id="dlabel"></span>
+      <button id="next" aria-label="Next day">›</button>
+    </div>
+  </div>
+  <div id="list"></div>
+  <details>
+    <summary>My teams</summary>
+    <div class="chips" id="chips"></div>
+    <input id="q" placeholder="Search for a team to follow…" autocomplete="off">
+    <div id="results"></div>
+  </details>
+  <div class="foot">Times shown in your local time zone · scores auto-refresh · data via ESPN</div>
+</div>
+<script>
+const API='https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball';
+let view='all', day=new Date(), games=[], teams=null, favs=load();
+function load(){try{return JSON.parse(localStorage.getItem('hoopsFavs')||'{}')}catch(e){return {}}}
+function save(){try{localStorage.setItem('hoopsFavs',JSON.stringify(favs))}catch(e){}}
+const ymd=d=>d.getFullYear()+String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0');
+const $=id=>document.getElementById(id);
+const tz=Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+function rank(c){const r=c.curatedRank&&c.curatedRank.current;return r&&r<=25?r:null}
+function isFav(c){return !!favs[c.team.id]}
+function relevant(g){return g.competitors.some(c=>isFav(c))}
+
+async function fetchGames(){
+  try{
+    const r=await fetch(`${API}/scoreboard?dates=${ymd(day)}&groups=50&limit=400`);
+    if(!r.ok)throw new Error(r.status);
+    const j=await r.json();
+    games=(j.events||[]).map(e=>{
+      const c=e.competitions[0], t=e.status.type;
+      const bc=(c.broadcasts||[]).flatMap(b=>b.names||[]).join(', ');
+      return {id:e.id,date:new Date(e.date),state:t.state,detail:t.shortDetail,
+        completed:t.completed,broadcast:bc,
+        competitors:[...c.competitors].sort((a,b)=>a.homeAway==='away'?-1:1)};
+    });
+    $('status').textContent='Updated '+new Date().toLocaleTimeString([],{hour:'numeric',minute:'2-digit',second:'2-digit'})+' ('+tz+')';
+  }catch(e){
+    games=[];$('list').innerHTML='<div class="err">Couldn’t load scores. Check your connection — retrying automatically.</div>';
+    $('status').textContent='Offline';return false;
+  }
+  return true;
+}
+
+function row(c,g){
+  const r=rank(c),sc=g.state==='pre'?'':c.score;
+  const win=g.state==='post'&&c.winner;
+  return `<div class="row">
+    <span class="rk">${r??''}</span>
+    <img src="${c.team.logo||''}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">
+    <span class="nm ${win?'win':''}">${c.team.displayName}</span>
+    <span class="sc">${sc}</span>
+    <button class="star ${isFav(c)?'f':''}" data-t="${c.team.id}" data-n="${c.team.displayName.replace(/"/g,'')}" data-l="${c.team.logo||''}" aria-label="Follow team">${isFav(c)?'★':'☆'}</button>
+  </div>`;
+}
+
+function render(){
+  document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('on',b.dataset.v===view));
+  const today=ymd(new Date())===ymd(day);
+  $('dlabel').textContent=today?'Today':day.toLocaleDateString([],{weekday:'short',month:'short',day:'numeric'});
+  let list=games.slice();
+  if(view==='fav')list=list.filter(relevant);
+  if(view==='top')list=list.filter(g=>g.competitors.some(c=>rank(c)));
+  if(view==='live')list=list.filter(g=>g.state==='in');
+  const order={in:0,pre:1,post:2};
+  list.sort((a,b)=>order[a.state]-order[b.state]||a.date-b.date);
+  if(!list.length){
+    const msg={fav:Object.keys(favs).length?'None of your teams play this day.':'Tap ☆ next to a team (or search under “My teams”) to follow it.',
+      top:'No ranked teams in action this day.',live:'No games in progress right now.',all:'No games scheduled.'}[view];
+    $('list').innerHTML=`<div class="empty">${msg}</div>`;return;
+  }
+  $('list').innerHTML=list.map(g=>{
+    const t=g.state==='pre'?g.date.toLocaleTimeString([],{hour:'numeric',minute:'2-digit',timeZoneName:'short'})
+      :g.state==='in'?`<span class="live">● LIVE · ${g.detail}</span>`:g.detail;
+    return `<div class="game">${g.competitors.map(c=>row(c,g)).join('')}
+      <div class="meta"><span>${t}</span><span>${g.broadcast}</span></div></div>`;
+  }).join('');
+}
+
+function renderChips(){
+  const ids=Object.keys(favs);
+  $('chips').innerHTML=ids.length?ids.map(id=>`<button data-rm="${id}">${favs[id].n} ✕</button>`).join(''):'<span class="sub">No teams yet.</span>';
+}
+
+function toggle(id,n,l){
+  if(favs[id])delete favs[id];else favs[id]={n,l};
+  save();renderChips();render();searchTeams();
+}
+
+async function loadTeams(){
+  if(teams)return;
+  try{
+    const j=await (await fetch(`${API}/teams?limit=400`)).json();
+    teams=j.sports[0].leagues[0].teams.map(x=>({id:x.team.id,n:x.team.displayName,l:(x.team.logos||[{}])[0].href||''}));
+  }catch(e){teams=[]}
+}
+async function searchTeams(){
+  const q=$('q').value.trim().toLowerCase();
+  if(!q){$('results').innerHTML='';return}
+  await loadTeams();
+  $('results').innerHTML=teams.filter(t=>t.n.toLowerCase().includes(q)).slice(0,8).map(t=>
+    `<div class="pick"><img src="${t.l}" alt=""><span style="flex:1">${t.n}</span>
+    <button class="star ${favs[t.id]?'f':''}" data-t="${t.id}" data-n="${t.n.replace(/"/g,'')}" data-l="${t.l}">${favs[t.id]?'★':'☆'}</button></div>`).join('')||'<div class="sub">No match.</div>';
+}
+
+$('tabs').innerHTML=[['all','All games'],['fav','My teams'],['top','Top 25'],['live','Live']].map(([v,l])=>`<button data-v="${v}">${l}</button>`).join('');
+document.addEventListener('click',e=>{
+  const b=e.target.closest('button');if(!b)return;
+  if(b.dataset.v){view=b.dataset.v;render()}
+  else if(b.dataset.t)toggle(b.dataset.t,b.dataset.n,b.dataset.l);
+  else if(b.dataset.rm){delete favs[b.dataset.rm];save();renderChips();render()}
+});
+$('prev').onclick=async()=>{day=new Date(day.getTime()-864e5);await refresh()};
+$('next').onclick=async()=>{day=new Date(day.getTime()+864e5);await refresh()};
+$('q').addEventListener('input',searchTeams);
+
+async function refresh(){if(await fetchGames())render()}
+renderChips();refresh();
+// live refresh: every 20s when viewing today and a game is in progress, else every 2 min
+setInterval(()=>{
+  if(document.hidden)return;
+  const today=ymd(new Date())===ymd(day);
+  if(today&&games.some(g=>g.state==='in'))refresh();
+},20000);
+setInterval(()=>{if(!document.hidden)refresh()},120000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh()});
+</script>
+</body>
+</html>
