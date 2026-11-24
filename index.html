@@ -52,6 +52,22 @@ button.on{background:var(--accent);border-color:var(--accent);color:#fff}
 .st .pos{color:var(--mute);font-size:13px;text-align:right}
 .st .cf{font-weight:700}
 select{font:inherit;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--text);max-width:100%;margin:8px 0}
+.lk{cursor:pointer}
+.lk:hover .nm,.nm.lk:hover,.tm.lk:hover span:last-child{text-decoration:underline}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:flex-start;justify-content:center;padding:24px 12px;overflow-y:auto;z-index:50}
+.modal[hidden]{display:none}
+.panel{background:var(--bg);border:1px solid var(--line);border-radius:14px;width:100%;max-width:560px;padding:14px 16px}
+.th{display:flex;align-items:center;gap:10px;padding-bottom:10px;border-bottom:1px solid var(--line)}
+.th img{width:42px;height:42px;object-fit:contain}
+.th .tn{font-size:18px;font-weight:700}
+.sec{font-size:12.5px;font-weight:700;color:var(--mute);text-transform:uppercase;letter-spacing:.04em;margin:14px 0 2px}
+.gm{display:grid;grid-template-columns:54px 1fr auto;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums}
+.gm .gd{color:var(--mute);font-size:13px}
+.gm .go{display:flex;align-items:center;gap:6px;min-width:0}
+.gm .go img{width:22px;height:22px;object-fit:contain}
+.gm .gr{text-align:right;font-weight:600}
+.gm .w{color:#12b76a;font-weight:700}
+.gm .l{color:var(--live);font-weight:700}
 .pts{color:var(--mute);font-size:12.5px;font-variant-numeric:tabular-nums}
 details{margin-top:14px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 14px}
 summary{cursor:pointer;font-weight:600}
@@ -84,6 +100,7 @@ input{font:inherit;width:100%;padding:8px 10px;margin:10px 0 6px;border:1px soli
   </details>
   <div class="foot">Times shown in your local time zone · scores auto-refresh · records shown as overall (conference) · data via ESPN</div>
 </div>
+<div class="modal" id="tm" hidden role="dialog" aria-modal="true"><div class="panel" id="tmbody"></div></div>
 <script>
 const BASE='https://site.api.espn.com/apis/site/v2/sports';
 const SPORTS={
@@ -124,6 +141,64 @@ function rank(c){
 }
 function isFav(c){return !!favs[c.team.id]}
 function relevant(g){return g.competitors.some(c=>isFav(c))}
+
+const oa=(id,n,l)=>`data-open="${id}" data-n="${String(n).replace(/"/g,'')}" data-l="${l||''}"`;
+
+// ---- team season history (modal) ----
+let tmReq=0;
+function closeTeam(){tmReq++;$('tm').hidden=true;document.body.style.overflow=''}
+function teamHead(id,n,l){
+  const rs=recText(recFor(id,[]));
+  return `<div class="th">${l?`<img src="${l}" alt="">`:''}<div style="flex:1"><div class="tn">${n}</div><div class="rec">${rs}</div></div>
+    <button class="star ${favs[id]?'f':''}" data-t="${id}" data-n="${String(n).replace(/"/g,'')}" data-l="${l||''}" aria-label="Follow team">${favs[id]?'★':'☆'}</button>
+    <button data-close aria-label="Close">✕</button></div>`;
+}
+async function fetchSched(sp,id,q){
+  try{const r=await fetch(`${BASE}/${SPORTS[sp].path}/teams/${id}/schedule${q}`);return r.ok?await r.json():null}catch(e){return null}
+}
+const scv=x=>{const s=x.score;if(s==null)return '';return typeof s==='object'?(s.displayValue!=null?s.displayValue:(s.value!=null?Math.round(s.value):'')):s};
+const tlogo=t=>(t.logos&&t.logos[0]&&t.logos[0].href)||t.logo||'';
+async function openTeam(id,n,l){
+  const my=++tmReq, sp=sport;
+  $('tm').hidden=false;document.body.style.overflow='hidden';
+  const head=teamHead(id,n,l);
+  $('tmbody').innerHTML=head+'<div class="empty">Loading season…</div>';
+  const [a,b]=await Promise.all([fetchSched(sp,id,''),fetchSched(sp,id,'?seasontype=3')]);
+  if(my!==tmReq)return;
+  if(!a&&!b){$('tmbody').innerHTML=head+'<div class="err">Couldn’t load this team’s schedule.</div>';return}
+  const seen=new Set(), evs=[];
+  [a,b].forEach(j=>j&&(j.events||[]).forEach(e=>{if(!seen.has(e.id)){seen.add(e.id);evs.push(e)}}));
+  const gs=evs.map(e=>{
+    const c=(e.competitions||[])[0]; if(!c)return null;
+    const me=c.competitors.find(x=>String(x.team.id)===String(id)), opp=c.competitors.find(x=>x!==me);
+    if(!me||!opp)return null;
+    const t=(c.status||e.status||{}).type||{};
+    return {date:new Date(e.date||c.date),state:t.state||'pre',detail:t.shortDetail||'',me,opp,neutral:!!c.neutralSite,ms:scv(me),os:scv(opp)};
+  }).filter(Boolean).sort((x,y)=>x.date-y.date);
+  const game=g=>{
+    const o=g.opp.team, on=o.displayName||o.shortDisplayName||((o.location||'')+' '+(o.name||'')).trim();
+    const at=(!g.neutral&&g.me.homeAway==='away')?'@':'vs';
+    let r;
+    if(g.state==='pre')r=g.date.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});
+    else{
+      const ms=parseFloat(g.ms), os=parseFloat(g.os);
+      const win=g.me.winner===true?true:g.opp.winner===true?false:(!isNaN(ms)&&!isNaN(os)&&ms!==os?ms>os:null);
+      const badge=g.state==='in'?'<span class="live">● LIVE</span>':win===true?'<span class="w">W</span>':win===false?'<span class="l">L</span>':'';
+      r=`${badge} ${g.ms!==''?g.ms+'–'+g.os:g.detail}`;
+    }
+    const day=g.date.toLocaleDateString([],{month:'short',day:'numeric'});
+    return `<div class="gm"><span class="gd">${day}</span>
+      <span class="go lk" ${oa(o.id,on,tlogo(o))}><span style="color:var(--mute)">${at}</span><img src="${tlogo(o)}" alt="" onerror="this.style.visibility='hidden'"><span style="overflow:hidden;text-overflow:ellipsis">${on}</span></span>
+      <span class="gr">${r}</span></div>`;
+  };
+  const done=gs.filter(g=>g.state!=='pre').reverse(), up=gs.filter(g=>g.state==='pre');
+  let body='';
+  if(done.length)body+=`<div class="sec">Results (${done.length})</div>`+done.map(game).join('');
+  if(up.length)body+=`<div class="sec">Upcoming (${up.length})</div>`+up.map(game).join('');
+  if(!gs.length)body='<div class="empty">No games found for this season.</div>';
+  $('tmbody').innerHTML=head+body;
+  fillRecs([String(id)]);
+}
 
 // ---- records (overall + conference) ----
 function pickRec(a){
@@ -226,7 +301,7 @@ function renderStandings(){
   <div class="rkcard"><div class="st h"><span></span><span>Team</span><span>Conf</span><span>Overall</span><span></span></div>`+
   rows.map((r,i)=>{const rk=rankById(r.id);return `<div class="st r">
     <span class="pos">${i+1}</span>
-    <span class="tm"><img src="${r.l}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">${rk?`<b>${rk}</b>`:''}<span>${r.n}</span></span>
+    <span class="tm lk" ${oa(r.id,r.n,r.l)}><img src="${r.l}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">${rk?`<b>${rk}</b>`:''}<span>${r.n}</span></span>
     <span class="num cf">${r.cf||'–'}</span><span class="num">${r.o||'–'}</span>
     <button class="star ${favs[r.id]?'f':''}" data-t="${r.id}" data-n="${r.n.replace(/"/g,'')}" data-l="${r.l}" aria-label="Follow team">${favs[r.id]?'★':'☆'}</button>
   </div>`}).join('')+`</div>`;
@@ -261,8 +336,8 @@ function row(c,g){
   const rs=recText(recFor(c.team.id,c.records));
   return `<div class="row">
     <span class="rk">${r??''}</span>
-    <img src="${c.team.logo||''}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">
-    <span class="nm ${win?'win':''}">${c.team.displayName}${rs?`<span class="rec">${rs}</span>`:''}</span>
+    <img class="lk" ${oa(c.team.id,c.team.displayName,c.team.logo)} src="${c.team.logo||''}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">
+    <span class="nm lk ${win?'win':''}" ${oa(c.team.id,c.team.displayName,c.team.logo)}>${c.team.displayName}${rs?`<span class="rec">${rs}</span>`:''}</span>
     <span class="sc">${sc}</span>
     <button class="star ${isFav(c)?'f':''}" data-t="${c.team.id}" data-n="${c.team.displayName.replace(/"/g,'')}" data-l="${c.team.logo||''}" aria-label="Follow team">${isFav(c)?'★':'☆'}</button>
   </div>`;
@@ -279,8 +354,8 @@ function renderRankings(){
     const R=recFor(t.id,[],sport), rs=recText({o:R.o||t.rec,cf:R.cf});
     return `<div class="row">
       <span class="rk">${t.rank}</span>
-      <img src="${t.l}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">
-      <span class="nm">${t.n}${rs?`<span class="rec">${rs}</span>`:''}</span>
+      <img class="lk" ${oa(t.id,t.n,t.l)} src="${t.l}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">
+      <span class="nm lk" ${oa(t.id,t.n,t.l)}>${t.n}${rs?`<span class="rec">${rs}</span>`:''}</span>
       ${t.pts!=null?`<span class="pts">${t.pts} pts</span>`:''}
       <button class="star ${favs[t.id]?'f':''}" data-t="${t.id}" data-n="${t.n.replace(/"/g,'')}" data-l="${t.l}" aria-label="Follow team">${favs[t.id]?'★':'☆'}</button>
     </div>`}).join('')+`</div>`;
@@ -334,6 +409,7 @@ function renderChips(){
 function toggle(id,n,l){
   if(favs[id])delete favs[id];else favs[id]={n,l};
   save();renderChips();render();searchTeams();
+  document.querySelectorAll('#tm .star').forEach(b=>{if(b.dataset.t===String(id)){const on=!!favs[id];b.classList.toggle('f',on);b.textContent=on?'★':'☆'}});
 }
 
 async function loadTeams(sp){
@@ -350,17 +426,21 @@ async function searchTeams(){
   const teams=await loadTeams(sp);
   if(sp!==sport||q!==$('q').value.trim().toLowerCase())return;   // stale
   $('results').innerHTML=teams.filter(t=>t.n.toLowerCase().includes(q)).slice(0,8).map(t=>
-    `<div class="pick"><img src="${t.l}" alt=""><span style="flex:1">${t.n}${(()=>{const x=recText(recFor(t.id,[],sp));return x?`<span class="rec">${x}</span>`:''})()}</span>
+    `<div class="pick"><img src="${t.l}" alt=""><span class="lk" style="flex:1" ${oa(t.id,t.n,t.l)}>${t.n}${(()=>{const x=recText(recFor(t.id,[],sp));return x?`<span class="rec">${x}</span>`:''})()}</span>
     <button class="star ${favs[t.id]?'f':''}" data-t="${t.id}" data-n="${t.n.replace(/"/g,'')}" data-l="${t.l}">${favs[t.id]?'★':'☆'}</button></div>`).join('')||'<div class="sub">No match.</div>';
 }
 
 $('sports').innerHTML=Object.keys(SPORTS).map(k=>`<button role="tab" data-s="${k}">${SPORTS[k].emoji} ${SPORTS[k].label}</button>`).join('');
 $('tabs').innerHTML=[['all','All games'],['fav','My teams'],['rank','Rankings'],['stand','Standings'],['top','Ranked games'],['live','Live']].map(([v,l])=>`<button data-v="${v}">${l}</button>`).join('');
 document.addEventListener('click',e=>{
+  if(e.target.id==='tm'){closeTeam();return}
+  const o=e.target.closest('[data-open]');
+  if(o&&!e.target.closest('button')){openTeam(o.dataset.open,o.dataset.n,o.dataset.l);return}
   const b=e.target.closest('button');if(!b)return;
+  if(b.dataset.close!==undefined){closeTeam();return}
   if(b.dataset.s){
     if(b.dataset.s===sport)return;
-    sport=b.dataset.s;favs=favsAll[sport]||(favsAll[sport]={});pollIdx=0;
+    closeTeam();sport=b.dataset.s;favs=favsAll[sport]||(favsAll[sport]={});pollIdx=0;
     try{localStorage.setItem('ncaaSport',sport)}catch(e){}
     games=[];$('q').value='';$('results').innerHTML='';
     $('list').innerHTML='<div class="empty">Loading…</div>';
@@ -371,6 +451,7 @@ document.addEventListener('click',e=>{
   else if(b.dataset.t)toggle(b.dataset.t,b.dataset.n,b.dataset.l);
   else if(b.dataset.rm){delete favs[b.dataset.rm];save();renderChips();render()}
 });
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('tm').hidden)closeTeam()});
 document.addEventListener('change',e=>{
   if(e.target.id==='confsel'){const d=standCache[sport];if(d&&d.groups[+e.target.value]){standConf[sport]=d.groups[+e.target.value].name;render()}}
 });
