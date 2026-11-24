@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>NCAA Hoops Tracker</title>
+<title>NCAA Scores Tracker</title>
 <style>
 :root{--bg:#f6f7f9;--card:#fff;--text:#14181f;--mute:#667085;--line:#e3e6eb;--accent:#e8590c;--live:#d92d20;color-scheme:light dark}
 @media (prefers-color-scheme:dark){:root{--bg:#0f1318;--card:#181e26;--text:#eef1f5;--mute:#8d98a8;--line:#2a323d;--accent:#ff8a3d;--live:#ff5b4d}}
@@ -16,6 +16,10 @@ h1{font-size:22px;margin:0 0 2px}
 .tabs{display:flex;gap:6px;flex-wrap:wrap}
 button{font:inherit;border:1px solid var(--line);background:var(--card);color:var(--text);padding:6px 12px;border-radius:999px;cursor:pointer}
 button.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.sports{margin:6px 0 2px;overflow-x:auto;flex-wrap:nowrap;padding-bottom:2px;scrollbar-width:none}
+.sports::-webkit-scrollbar{display:none}
+.sports button{white-space:nowrap;font-weight:600}
+.sets{color:var(--mute);font-size:12.5px;margin-top:4px;font-variant-numeric:tabular-nums}
 .date{display:flex;gap:6px;align-items:center;margin-left:auto}
 .date span{min-width:110px;text-align:center;font-weight:600}
 .game{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin:8px 0}
@@ -42,8 +46,9 @@ input{font:inherit;width:100%;padding:8px 10px;margin:10px 0 6px;border:1px soli
 </head>
 <body>
 <div class="wrap">
-  <h1>🏀 NCAA Hoops Tracker</h1>
+  <h1>🏀🏐 NCAA Scores Tracker</h1>
   <div class="sub" id="status">Loading…</div>
+  <div class="tabs sports" id="sports" role="tablist" aria-label="Sport"></div>
   <div class="bar">
     <div class="tabs" id="tabs"></div>
     <div class="date">
@@ -62,10 +67,27 @@ input{font:inherit;width:100%;padding:8px 10px;margin:10px 0 6px;border:1px soli
   <div class="foot">Times shown in your local time zone · scores auto-refresh · data via ESPN</div>
 </div>
 <script>
-const API='https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball';
-let view='all', day=new Date(), games=[], teams=null, favs=load();
-function load(){try{return JSON.parse(localStorage.getItem('hoopsFavs')||'{}')}catch(e){return {}}}
-function save(){try{localStorage.setItem('hoopsFavs',JSON.stringify(favs))}catch(e){}}
+const BASE='https://site.api.espn.com/apis/site/v2/sports';
+const SPORTS={
+  mbb:{label:'Men\u2019s Basketball',emoji:'🏀',path:'basketball/mens-college-basketball',q:'&groups=50',vb:false},
+  wbb:{label:'Women\u2019s Basketball',emoji:'🏀',path:'basketball/womens-college-basketball',q:'&groups=50',vb:false},
+  wvb:{label:'Women\u2019s Volleyball',emoji:'🏐',path:'volleyball/womens-college-volleyball',q:'',vb:true},
+  mvb:{label:'Men\u2019s Volleyball',emoji:'🏐',path:'volleyball/mens-college-volleyball',q:'',vb:true}
+};
+function loadSport(){try{const v=localStorage.getItem('ncaaSport');return SPORTS[v]?v:'mbb'}catch(e){return 'mbb'}}
+let sport=loadSport(), view='all', day=new Date(), games=[], teamsCache={}, reqId=0;
+// favourites are stored per sport: {mbb:{id:{n,l}},wbb:{...},...}
+function load(){
+  try{
+    const o=JSON.parse(localStorage.getItem('hoopsFavs')||'{}')||{};
+    const keys=Object.keys(o);
+    if(keys.length&&!keys.every(k=>SPORTS[k]))return {mbb:o};   // migrate old single-sport format
+    return o;
+  }catch(e){return {}}
+}
+const favsAll=load();
+let favs=favsAll[sport]||(favsAll[sport]={});
+function save(){try{localStorage.setItem('hoopsFavs',JSON.stringify(favsAll))}catch(e){}}
 const ymd=d=>d.getFullYear()+String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0');
 const $=id=>document.getElementById(id);
 const tz=Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -75,10 +97,12 @@ function isFav(c){return !!favs[c.team.id]}
 function relevant(g){return g.competitors.some(c=>isFav(c))}
 
 async function fetchGames(){
+  const my=++reqId, sp=sport;
   try{
-    const r=await fetch(`${API}/scoreboard?dates=${ymd(day)}&groups=50&limit=400`);
+    const r=await fetch(`${BASE}/${SPORTS[sp].path}/scoreboard?dates=${ymd(day)}${SPORTS[sp].q}&limit=400`);
     if(!r.ok)throw new Error(r.status);
     const j=await r.json();
+    if(my!==reqId)return false;   // user switched sport/day while loading
     games=(j.events||[]).map(e=>{
       const c=e.competitions[0], t=e.status.type;
       const bc=(c.broadcasts||[]).flatMap(b=>b.names||[]).join(', ');
@@ -86,8 +110,9 @@ async function fetchGames(){
         completed:t.completed,broadcast:bc,
         competitors:[...c.competitors].sort((a,b)=>a.homeAway==='away'?-1:1)};
     });
-    $('status').textContent='Updated '+new Date().toLocaleTimeString([],{hour:'numeric',minute:'2-digit',second:'2-digit'})+' ('+tz+')';
+    $('status').textContent=SPORTS[sp].label+' · Updated '+new Date().toLocaleTimeString([],{hour:'numeric',minute:'2-digit',second:'2-digit'})+' ('+tz+')';
   }catch(e){
+    if(my!==reqId)return false;
     games=[];$('list').innerHTML='<div class="err">Couldn’t load scores. Check your connection — retrying automatically.</div>';
     $('status').textContent='Offline';return false;
   }
@@ -108,6 +133,7 @@ function row(c,g){
 
 function render(){
   document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('on',b.dataset.v===view));
+  document.querySelectorAll('#sports button').forEach(b=>{const on=b.dataset.s===sport;b.classList.toggle('on',on);b.setAttribute('aria-selected',on)});
   const today=ymd(new Date())===ymd(day);
   $('dlabel').textContent=today?'Today':day.toLocaleDateString([],{weekday:'short',month:'short',day:'numeric'});
   let list=games.slice();
@@ -124,7 +150,13 @@ function render(){
   $('list').innerHTML=list.map(g=>{
     const t=g.state==='pre'?g.date.toLocaleTimeString([],{hour:'numeric',minute:'2-digit',timeZoneName:'short'})
       :g.state==='in'?`<span class="live">● LIVE · ${g.detail}</span>`:g.detail;
-    return `<div class="game">${g.competitors.map(c=>row(c,g)).join('')}
+    let sets='';
+    if(SPORTS[sport].vb&&g.state!=='pre'&&g.competitors.length===2){
+      const [a,h]=g.competitors,al=a.linescores||[],hl=h.linescores||[];
+      const parts=al.map((l,i)=>hl[i]?Math.round(l.value)+'–'+Math.round(hl[i].value):'').filter(Boolean);
+      if(parts.length)sets=`<div class="sets">Sets: ${parts.join(', ')}</div>`;
+    }
+    return `<div class="game">${g.competitors.map(c=>row(c,g)).join('')}${sets}
       <div class="meta"><span>${t}</span><span>${g.broadcast}</span></div></div>`;
   }).join('');
 }
@@ -139,26 +171,37 @@ function toggle(id,n,l){
   save();renderChips();render();searchTeams();
 }
 
-async function loadTeams(){
-  if(teams)return;
+async function loadTeams(sp){
+  if(teamsCache[sp])return teamsCache[sp];
   try{
-    const j=await (await fetch(`${API}/teams?limit=400`)).json();
-    teams=j.sports[0].leagues[0].teams.map(x=>({id:x.team.id,n:x.team.displayName,l:(x.team.logos||[{}])[0].href||''}));
-  }catch(e){teams=[]}
+    const j=await (await fetch(`${BASE}/${SPORTS[sp].path}/teams?limit=400`)).json();
+    teamsCache[sp]=j.sports[0].leagues[0].teams.map(x=>({id:x.team.id,n:x.team.displayName,l:(x.team.logos||[{}])[0].href||''}));
+  }catch(e){return []}
+  return teamsCache[sp];
 }
 async function searchTeams(){
-  const q=$('q').value.trim().toLowerCase();
+  const q=$('q').value.trim().toLowerCase(), sp=sport;
   if(!q){$('results').innerHTML='';return}
-  await loadTeams();
+  const teams=await loadTeams(sp);
+  if(sp!==sport||q!==$('q').value.trim().toLowerCase())return;   // stale
   $('results').innerHTML=teams.filter(t=>t.n.toLowerCase().includes(q)).slice(0,8).map(t=>
     `<div class="pick"><img src="${t.l}" alt=""><span style="flex:1">${t.n}</span>
     <button class="star ${favs[t.id]?'f':''}" data-t="${t.id}" data-n="${t.n.replace(/"/g,'')}" data-l="${t.l}">${favs[t.id]?'★':'☆'}</button></div>`).join('')||'<div class="sub">No match.</div>';
 }
 
+$('sports').innerHTML=Object.keys(SPORTS).map(k=>`<button role="tab" data-s="${k}">${SPORTS[k].emoji} ${SPORTS[k].label}</button>`).join('');
 $('tabs').innerHTML=[['all','All games'],['fav','My teams'],['top','Top 25'],['live','Live']].map(([v,l])=>`<button data-v="${v}">${l}</button>`).join('');
 document.addEventListener('click',e=>{
   const b=e.target.closest('button');if(!b)return;
-  if(b.dataset.v){view=b.dataset.v;render()}
+  if(b.dataset.s){
+    if(b.dataset.s===sport)return;
+    sport=b.dataset.s;favs=favsAll[sport]||(favsAll[sport]={});
+    try{localStorage.setItem('ncaaSport',sport)}catch(e){}
+    games=[];$('q').value='';$('results').innerHTML='';
+    $('list').innerHTML='<div class="empty">Loading…</div>';
+    renderChips();render();refresh();
+  }
+  else if(b.dataset.v){view=b.dataset.v;render()}
   else if(b.dataset.t)toggle(b.dataset.t,b.dataset.n,b.dataset.l);
   else if(b.dataset.rm){delete favs[b.dataset.rm];save();renderChips();render()}
 });
