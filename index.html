@@ -46,7 +46,7 @@ input{font:inherit;width:100%;padding:8px 10px;margin:10px 0 6px;border:1px soli
 </head>
 <body>
 <div class="wrap">
-  <h1>🏀🏐 NCAA Scores Tracker</h1>
+  <h1>🏀🏐⚾ NCAA Scores Tracker</h1>
   <div class="sub" id="status">Loading…</div>
   <div class="tabs sports" id="sports" role="tablist" aria-label="Sport"></div>
   <div class="bar">
@@ -72,7 +72,9 @@ const SPORTS={
   mbb:{label:'Men\u2019s Basketball',emoji:'🏀',path:'basketball/mens-college-basketball',q:'&groups=50',vb:false},
   wbb:{label:'Women\u2019s Basketball',emoji:'🏀',path:'basketball/womens-college-basketball',q:'&groups=50',vb:false},
   wvb:{label:'Women\u2019s Volleyball',emoji:'🏐',path:'volleyball/womens-college-volleyball',q:'',vb:true},
-  mvb:{label:'Men\u2019s Volleyball',emoji:'🏐',path:'volleyball/mens-college-volleyball',q:'',vb:true}
+  mvb:{label:'Men\u2019s Volleyball',emoji:'🏐',path:'volleyball/mens-college-volleyball',q:'',vb:true},
+  bsb:{label:'Baseball',emoji:'⚾',path:'baseball/college-baseball',q:'',vb:false},
+  sfb:{label:'Softball',emoji:'🥎',path:'softball/college-softball',q:'',vb:false}
 };
 function loadSport(){try{const v=localStorage.getItem('ncaaSport');return SPORTS[v]?v:'mbb'}catch(e){return 'mbb'}}
 let sport=loadSport(), view='all', day=new Date(), games=[], teamsCache={}, reqId=0;
