@@ -41,6 +41,17 @@ button.on{background:var(--accent);border-color:var(--accent);color:#fff}
 .rkcard .row{padding:7px 0;border-bottom:1px solid var(--line)}
 .rkcard .row:last-child{border-bottom:0}
 .rkcard .rk{font-size:15px;font-weight:700;color:var(--text);min-width:26px}
+.st{display:grid;grid-template-columns:26px 1fr 62px 66px 30px;gap:8px;align-items:center}
+.st.h{color:var(--mute);font-size:12px;font-weight:600;padding:8px 0 4px;border-bottom:1px solid var(--line)}
+.st.h span:nth-child(n+3),.st .num{text-align:center}
+.st.r{padding:7px 0;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums}
+.st.r:last-child{border-bottom:0}
+.st .tm{display:flex;align-items:center;gap:8px;min-width:0;font-weight:500}
+.st .tm img{width:22px;height:22px;object-fit:contain}
+.st .tm b{color:var(--mute);font-size:11.5px;font-weight:600}
+.st .pos{color:var(--mute);font-size:13px;text-align:right}
+.st .cf{font-weight:700}
+select{font:inherit;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--text);max-width:100%;margin:8px 0}
 .pts{color:var(--mute);font-size:12.5px;font-variant-numeric:tabular-nums}
 details{margin-top:14px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 14px}
 summary{cursor:pointer;font-weight:600}
@@ -71,7 +82,7 @@ input{font:inherit;width:100%;padding:8px 10px;margin:10px 0 6px;border:1px soli
     <input id="q" placeholder="Search for a team to follow…" autocomplete="off">
     <div id="results"></div>
   </details>
-  <div class="foot">Times shown in your local time zone · scores auto-refresh · records shown as overall · conference · data via ESPN</div>
+  <div class="foot">Times shown in your local time zone · scores auto-refresh · records shown as overall (conference) · data via ESPN</div>
 </div>
 <script>
 const BASE='https://site.api.espn.com/apis/site/v2/sports';
@@ -86,7 +97,7 @@ const SPORTS={
 };
 function loadSport(){try{const v=localStorage.getItem('ncaaSport');return SPORTS[v]?v:'mbb'}catch(e){return 'mbb'}}
 let sport=loadSport(), view='all', day=new Date(), games=[], teamsCache={}, reqId=0;
-let ranksCache={}, teamRec={}, pollIdx=0;
+let ranksCache={}, teamRec={}, pollIdx=0, standCache={}, standConf={};
 // favourites are stored per sport: {mbb:{id:{n,l}},wbb:{...},...}
 function load(){
   try{
@@ -116,14 +127,20 @@ function relevant(g){return g.competitors.some(c=>isFav(c))}
 
 // ---- records (overall + conference) ----
 function pickRec(a){
-  const f=re=>{const x=(a||[]).find(r=>re.test((r.type||'')+' '+(r.name||'')+' '+(r.description||'')));return x&&x.summary};
+  const f=re=>{const x=(a||[]).find(r=>re.test((r.type||'')+' '+(r.name||'')+' '+(r.description||''))&&/^\d+-\d+/.test(r.summary||''));return x&&x.summary};
   return {o:f(/total|overall/i),cf:f(/conf/i)};
 }
 function recFor(id,list,sp){
-  const a=pickRec(list), b=teamRec[(sp||sport)+id]||{};
-  return {o:a.o||b.o||'',cf:a.cf||b.cf||''};
+  sp=sp||sport;
+  const a=pickRec(list), b=teamRec[sp+id]||{}, s=(standCache[sp]&&standCache[sp].map[String(id)])||{};
+  return {o:a.o||s.o||b.o||'',cf:a.cf||s.cf||b.cf||''};
 }
-function recText(R){return [R.o,R.cf?R.cf+' conf':''].filter(Boolean).join(' · ')}
+// shown everywhere as: overall (conference), e.g. 12-2 (6-1)
+function recText(R){return [R.o,R.cf?'('+R.cf+')':''].filter(Boolean).join(' ')}
+function rankById(id){
+  const d=ranksCache[sport], p=d&&d.polls[0], m=p&&p.ranks.find(x=>x.id===String(id));
+  return m?m.rank:null;
+}
 async function loadTeamRecs(ids,sp){
   await Promise.all(ids.map(async id=>{
     try{
@@ -159,6 +176,60 @@ async function loadRankings(sp){
     ranksCache[sp]={t:Date.now(),polls};
   }catch(e){return c||(ranksCache[sp]={t:Date.now()-540000,polls:[]})}   // retry in ~1 min on failure
   return ranksCache[sp];
+}
+
+// ---- standings (by conference) ----
+function stat(e,re,wl){
+  const s=(e.stats||[]).find(x=>re.test([x.name,x.type,x.displayName,x.shortDisplayName,x.abbreviation].join(' '))&&(!wl||/^\d+-\d+/.test(x.displayValue||x.summary||'')));
+  return s?(s.displayValue||s.summary||''):'';
+}
+function collect(node,parent,root){
+  const out=[], name=root?'':(node.name||node.abbreviation||'');
+  const label=parent&&name?parent+' \u00b7 '+name:(name||parent||'');
+  const es=node.standings&&node.standings.entries;
+  if(es&&es.length)out.push({name:label||'All teams',rows:es.filter(e=>e.team).map(e=>({
+    id:String(e.team.id),n:e.team.displayName||e.team.name,
+    l:(e.team.logos&&e.team.logos[0]&&e.team.logos[0].href)||e.team.logo||'',
+    o:stat(e,/overall|total/i,true),cf:stat(e,/conf/i,true)}))});
+  (node.children||[]).forEach(ch=>out.push(...collect(ch,label,false)));
+  return out;
+}
+async function loadStandings(sp){
+  const c=standCache[sp];
+  if(c&&Date.now()-c.t<600000)return c;
+  const S='https://site.api.espn.com/apis/v2/sports/'+SPORTS[sp].path+'/standings';
+  const g=(SPORTS[sp].q.match(/groups=(\d+)/)||[])[1];
+  const urls=[S,g?S+'?group='+g:null,S+'?level=3'].filter(Boolean);
+  let groups=[];
+  for(const u of urls){
+    try{
+      const r=await fetch(u);if(!r.ok)continue;
+      groups=collect(await r.json(),'',true);
+      if(groups.length)break;
+    }catch(e){}
+  }
+  groups.sort((a,b)=>a.name.localeCompare(b.name));
+  const map={};
+  groups.forEach(gr=>gr.rows.forEach(r=>{map[r.id]={o:r.o,cf:r.cf}}));
+  return standCache[sp]={t:groups.length?Date.now():Date.now()-540000,groups,map};   // retry in ~1 min on failure
+}
+const wlPct=s=>{const m=/^(\d+)-(\d+)/.exec(s||'');return m&&(+m[1]+ +m[2])?+m[1]/(+m[1]+ +m[2]):-1};
+function renderStandings(){
+  const d=standCache[sport];
+  if(!d){$('list').innerHTML='<div class="empty">Loading standings…</div>';return}
+  if(!d.groups.length){$('list').innerHTML='<div class="empty">Standings aren\u2019t available for this sport right now.</div>';return}
+  let gi=d.groups.findIndex(g=>g.name===standConf[sport]);
+  if(gi<0){gi=d.groups.findIndex(g=>g.rows.some(r=>favs[r.id]));if(gi<0)gi=0}
+  const gr=d.groups[gi];
+  const rows=gr.rows.slice().sort((a,b)=>wlPct(b.cf)-wlPct(a.cf)||wlPct(b.o)-wlPct(a.o));
+  $('list').innerHTML=`<select id="confsel" aria-label="Conference">${d.groups.map((g,i)=>`<option value="${i}" ${i===gi?'selected':''}>${g.name}</option>`).join('')}</select>
+  <div class="rkcard"><div class="st h"><span></span><span>Team</span><span>Conf</span><span>Overall</span><span></span></div>`+
+  rows.map((r,i)=>{const rk=rankById(r.id);return `<div class="st r">
+    <span class="pos">${i+1}</span>
+    <span class="tm"><img src="${r.l}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">${rk?`<b>${rk}</b>`:''}<span>${r.n}</span></span>
+    <span class="num cf">${r.cf||'–'}</span><span class="num">${r.o||'–'}</span>
+    <button class="star ${favs[r.id]?'f':''}" data-t="${r.id}" data-n="${r.n.replace(/"/g,'')}" data-l="${r.l}" aria-label="Follow team">${favs[r.id]?'★':'☆'}</button>
+  </div>`}).join('')+`</div>`;
 }
 
 async function fetchGames(){
@@ -205,7 +276,7 @@ function renderRankings(){
   const p=d.polls[pollIdx];
   const tabs=d.polls.length>1?`<div class="tabs polls">${d.polls.map((x,i)=>`<button data-p="${i}" class="${i===pollIdx?'on':''}">${x.name}</button>`).join('')}</div>`:`<div class="sub polls"><b>${p.name}</b></div>`;
   $('list').innerHTML=tabs+`<div class="rkcard">`+p.ranks.map(t=>{
-    const rs=recText(recFor(t.id,[],sport).o||recFor(t.id,[],sport).cf?recFor(t.id,[],sport):{o:t.rec,cf:''});
+    const R=recFor(t.id,[],sport), rs=recText({o:R.o||t.rec,cf:R.cf});
     return `<div class="row">
       <span class="rk">${t.rank}</span>
       <img src="${t.l}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">
@@ -221,8 +292,9 @@ function render(){
   document.querySelectorAll('#sports button').forEach(b=>{const on=b.dataset.s===sport;b.classList.toggle('on',on);b.setAttribute('aria-selected',on)});
   const today=ymd(new Date())===ymd(day);
   $('dlabel').textContent=today?'Today':day.toLocaleDateString([],{weekday:'short',month:'short',day:'numeric'});
-  $('dwrap').style.display=view==='rank'?'none':'';
+  $('dwrap').style.display=(view==='rank'||view==='stand')?'none':'';
   if(view==='rank'){renderRankings();return}
+  if(view==='stand'){renderStandings();return}
   let list=games.slice();
   if(view==='fav')list=list.filter(relevant);
   if(view==='top')list=list.filter(g=>g.competitors.some(c=>rank(c)));
@@ -278,12 +350,12 @@ async function searchTeams(){
   const teams=await loadTeams(sp);
   if(sp!==sport||q!==$('q').value.trim().toLowerCase())return;   // stale
   $('results').innerHTML=teams.filter(t=>t.n.toLowerCase().includes(q)).slice(0,8).map(t=>
-    `<div class="pick"><img src="${t.l}" alt=""><span style="flex:1">${t.n}</span>
+    `<div class="pick"><img src="${t.l}" alt=""><span style="flex:1">${t.n}${(()=>{const x=recText(recFor(t.id,[],sp));return x?`<span class="rec">${x}</span>`:''})()}</span>
     <button class="star ${favs[t.id]?'f':''}" data-t="${t.id}" data-n="${t.n.replace(/"/g,'')}" data-l="${t.l}">${favs[t.id]?'★':'☆'}</button></div>`).join('')||'<div class="sub">No match.</div>';
 }
 
 $('sports').innerHTML=Object.keys(SPORTS).map(k=>`<button role="tab" data-s="${k}">${SPORTS[k].emoji} ${SPORTS[k].label}</button>`).join('');
-$('tabs').innerHTML=[['all','All games'],['fav','My teams'],['rank','Rankings'],['top','Ranked games'],['live','Live']].map(([v,l])=>`<button data-v="${v}">${l}</button>`).join('');
+$('tabs').innerHTML=[['all','All games'],['fav','My teams'],['rank','Rankings'],['stand','Standings'],['top','Ranked games'],['live','Live']].map(([v,l])=>`<button data-v="${v}">${l}</button>`).join('');
 document.addEventListener('click',e=>{
   const b=e.target.closest('button');if(!b)return;
   if(b.dataset.s){
@@ -299,15 +371,18 @@ document.addEventListener('click',e=>{
   else if(b.dataset.t)toggle(b.dataset.t,b.dataset.n,b.dataset.l);
   else if(b.dataset.rm){delete favs[b.dataset.rm];save();renderChips();render()}
 });
+document.addEventListener('change',e=>{
+  if(e.target.id==='confsel'){const d=standCache[sport];if(d&&d.groups[+e.target.value]){standConf[sport]=d.groups[+e.target.value].name;render()}}
+});
 $('prev').onclick=async()=>{day=new Date(day.getTime()-864e5);await refresh()};
 $('next').onclick=async()=>{day=new Date(day.getTime()+864e5);await refresh()};
 $('q').addEventListener('input',searchTeams);
 
 async function refresh(){
   const sp=sport;
-  const [ok]=await Promise.all([fetchGames(),loadRankings(sp)]);
+  const [ok]=await Promise.all([fetchGames(),loadRankings(sp),loadStandings(sp)]);
   if(sp!==sport)return;
-  if(ok||view==='rank')render();
+  if(ok||view==='rank'||view==='stand')render();
 }
 renderChips();refresh();
 // live refresh: every 20s when viewing today and a game is in progress, else every 2 min
